@@ -1,14 +1,32 @@
 import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const supabaseKey = String.fromEnvironment('SUPABASE_ANON_KEY');
 const youtubeApiKey = String.fromEnvironment('YOUTUBE_API_KEY');
 
+class PikafyTheme {
+  static final ValueNotifier<double> hue = ValueNotifier<double>(258);
+  static final ValueNotifier<bool> glass = ValueNotifier<bool>(true);
+  static Future<void> load() async {
+    final p = await SharedPreferences.getInstance();
+    hue.value = p.getDouble('theme_hue') ?? 258;
+    glass.value = p.getBool('theme_glass') ?? true;
+  }
+  static Future<void> save() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setDouble('theme_hue', hue.value);
+    await p.setBool('theme_glass', glass.value);
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await PikafyTheme.load();
   if (supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty) {
     await Supabase.initialize(url: supabaseUrl, anonKey: supabaseKey);
   }
@@ -18,20 +36,23 @@ Future<void> main() async {
 class PikafyApp extends StatelessWidget {
   const PikafyApp({super.key});
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    debugShowCheckedModeBanner: false,
-    title: 'Pikafy',
-    theme: ThemeData(
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: const Color(0xFF090B12),
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF9A83FF), brightness: Brightness.dark),
-      useMaterial3: true,
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true, fillColor: const Color(0xFF171A27),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+  Widget build(BuildContext context) => ValueListenableBuilder<double>(
+    valueListenable: PikafyTheme.hue,
+    builder: (context, hue, _) => MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Pikafy',
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF090B12),
+        colorScheme: ColorScheme.fromSeed(seedColor: HSVColor.fromAHSV(1, hue, .58, 1).toColor(), brightness: Brightness.dark),
+        useMaterial3: true,
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true, fillColor: const Color(0xFF171A27),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+        ),
       ),
+      home: supabaseUrl.isEmpty || supabaseKey.isEmpty ? const SetupScreen() : const AuthGate(),
     ),
-    home: supabaseUrl.isEmpty || supabaseKey.isEmpty ? const SetupScreen() : const AuthGate(),
   );
 }
 
@@ -198,7 +219,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: const Text('pikafy', style: TextStyle(fontWeight: FontWeight.w800)),
-      actions: [IconButton(tooltip: 'Log out', onPressed: () => Supabase.instance.client.auth.signOut(), icon: const Icon(Icons.logout_rounded))],
+      actions: [
+        IconButton(tooltip: 'Theme studio', icon: const Icon(Icons.palette_outlined),
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ThemeMakerScreen()))),
+        IconButton(tooltip: 'Log out', onPressed: () => Supabase.instance.client.auth.signOut(), icon: const Icon(Icons.logout_rounded)),
+      ],
     ),
     body: SafeArea(child: Column(children: [
       Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 12), child: TextField(
@@ -257,4 +282,72 @@ class _HomeScreenState extends State<HomeScreen> {
       )),
     ));
   }
+}
+
+class ThemeMakerScreen extends StatefulWidget {
+  const ThemeMakerScreen({super.key});
+  @override
+  State<ThemeMakerScreen> createState() => _ThemeMakerScreenState();
+}
+class _ThemeMakerScreenState extends State<ThemeMakerScreen> {
+  late double hue;
+  late bool glass;
+  @override
+  void initState() {
+    super.initState();
+    hue = PikafyTheme.hue.value;
+    glass = PikafyTheme.glass.value;
+  }
+  Color get accent => HSVColor.fromAHSV(1, hue, .58, 1).toColor();
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Theme studio')),
+    body: ListView(padding: const EdgeInsets.all(20), children: [
+      const Text('MAKE PIKAFY YOURS', style: TextStyle(letterSpacing: 2, color: Colors.white60, fontSize: 12)),
+      const SizedBox(height: 16),
+      ClipRRect(borderRadius: BorderRadius.circular(28), child: Stack(children: [
+        Container(height: 180, decoration: BoxDecoration(gradient: LinearGradient(
+          colors: [const Color(0xFF101522), accent.withValues(alpha: .55), const Color(0xFF101522)]))),
+        if (glass) Positioned.fill(child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(color: Colors.white.withValues(alpha: .06)))),
+        Positioned.fill(child: Padding(padding: const EdgeInsets.all(20), child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Icon(Icons.graphic_eq, size: 34), const Spacer(),
+            const Text('Your theme preview', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Container(height: 8, width: 150, decoration: BoxDecoration(color: accent, borderRadius: BorderRadius.circular(20))),
+            const SizedBox(height: 8),
+            const Text('Liquid glass • Custom accent', style: TextStyle(color: Colors.white70)),
+          ]))),
+      ])),
+      const SizedBox(height: 28),
+      const Text('Accent colour', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+      Slider(value: hue, min: 0, max: 360, divisions: 360, activeColor: accent,
+        onChanged: (v) => setState(() => hue = v)),
+      Wrap(spacing: 10, children: [258.0, 195.0, 330.0, 25.0, 110.0, 45.0].map((v) =>
+        GestureDetector(onTap: () => setState(() => hue = v),
+          child: CircleAvatar(radius: 17, backgroundColor: HSVColor.fromAHSV(1, v, .58, 1).toColor(),
+            child: (hue - v).abs() < 1 ? const Icon(Icons.check, size: 18, color: Colors.white) : null))
+      ).toList()),
+      const SizedBox(height: 24),
+      SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Liquid glass effect'),
+        subtitle: const Text('Frosted translucent panels with blur'), value: glass,
+        onChanged: (v) => setState(() => glass = v)),
+      const SizedBox(height: 18),
+      FilledButton.icon(icon: const Icon(Icons.check), label: const Text('Save my theme'),
+        onPressed: () async {
+          PikafyTheme.hue.value = hue;
+          PikafyTheme.glass.value = glass;
+          await PikafyTheme.save();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Theme saved on this device.')));
+            Navigator.pop(context);
+          }
+        }),
+      const SizedBox(height: 10),
+      const Text('Saved on this device for now. Cloud theme sync can be added later.',
+        style: TextStyle(color: Colors.white54, fontSize: 12)),
+    ]),
+  );
 }
