@@ -89,17 +89,51 @@ class _LoginScreenState extends State<LoginScreen> {
   bool creating = false, busy = false;
   String message = '';
   Future<void> submit() async {
+    final address = email.text.trim();
+    final secret = password.text;
+    if (address.isEmpty || secret.isEmpty) {
+      setState(() => message = 'Enter your email and password.');
+      return;
+    }
     setState(() { busy = true; message = ''; });
     try {
       final auth = Supabase.instance.client.auth;
-      if (creating) {
-        await auth.signUp(email: email.text.trim(), password: password.text);
-        message = 'Account request sent. Check your email if confirmation is enabled.';
-      } else {
-        await auth.signInWithPassword(email: email.text.trim(), password: password.text);
+      Object? lastError;
+      // Retry brief DNS/network interruptions. This cannot bypass a device
+      // whose DNS resolver is persistently unable to find the Supabase host.
+      for (var attempt = 0; attempt < 3; attempt++) {
+        try {
+          if (creating) {
+            await auth.signUp(email: address, password: secret);
+            message = 'Account request sent. Check your email if confirmation is enabled.';
+          } else {
+            await auth.signInWithPassword(email: address, password: secret);
+          }
+          lastError = null;
+          break;
+        } on AuthException {
+          rethrow;
+        } catch (e) {
+          lastError = e;
+          final text = e.toString().toLowerCase();
+          final isLookupFailure = text.contains('failed host lookup') ||
+              text.contains('socketexception') ||
+              text.contains('connection failed');
+          if (!isLookupFailure || attempt == 2) rethrow;
+          await Future.delayed(Duration(milliseconds: 700 * (attempt + 1)));
+        }
       }
-    } on AuthException catch (e) { message = e.message; }
-    catch (_) { message = 'Something went wrong. Please try again.'; }
+      if (lastError != null) throw lastError;
+    } on AuthException catch (e) {
+      message = e.message;
+    } catch (e) {
+      final details = e.toString().toLowerCase();
+      if (details.contains('failed host lookup') || details.contains('socketexception')) {
+        message = 'Pikafy cannot reach Supabase because this device could not resolve its server address. Check your internet connection or Android Private DNS, then try again. No account was created by this failed connection.';
+      } else {
+        message = 'Connection failed. Please check your internet and try again.';
+      }
+    }
     if (mounted) setState(() => busy = false);
   }
   @override
