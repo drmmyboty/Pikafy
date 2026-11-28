@@ -320,16 +320,13 @@ class _HomeScreenState extends State<HomeScreen> {
               subtitle: Text(item.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
               trailing: IconButton(icon: const Icon(Icons.lyrics_outlined), tooltip: 'Find lyrics', onPressed: () => _showLyrics(item)),
             );
-            return ValueListenableBuilder<bool>(
-              valueListenable: PikafyTheme.glass,
-              builder: (context, enabled, _) => Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: PikafyTheme.compact ? 1 : 4),
-                child: ClipRRect(borderRadius: BorderRadius.circular(18),
-                  child: enabled
-                    ? BackdropFilter(filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                        child: Container(color: Colors.white.withValues(alpha: .055), child: tile))
-                    : Card(margin: EdgeInsets.zero, child: tile)),
-              ),
+            return Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: PikafyTheme.compact ? 1 : 4),
+              child: ClipRRect(borderRadius: BorderRadius.circular(18),
+                child: PikafyTheme.glass
+                  ? BackdropFilter(filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                      child: Container(color: Colors.white.withValues(alpha: .055), child: tile))
+                  : Card(margin: EdgeInsets.zero, child: tile)),
             );
           })),
       const Padding(padding: EdgeInsets.all(10), child: Text('Metadata and lyrics only. YouTube Data API does not provide audio playback.', style: TextStyle(color: Colors.white38, fontSize: 11), textAlign: TextAlign.center)),
