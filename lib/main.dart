@@ -10,17 +10,38 @@ const supabaseKey = String.fromEnvironment('SUPABASE_ANON_KEY');
 const youtubeApiKey = String.fromEnvironment('YOUTUBE_API_KEY');
 
 class PikafyTheme {
-  static final ValueNotifier<double> hue = ValueNotifier<double>(258);
-  static final ValueNotifier<bool> glass = ValueNotifier<bool>(true);
+  static final ValueNotifier<int> revision = ValueNotifier<int>(0);
+  static double hue = 258, saturation = 0, brightness = 0;
+  static bool glass = true, amoled = true, compact = false, reduceMotion = false;
+  static Color get background => amoled ? const Color(0xFF000000) :
+      HSVColor.fromAHSV(1, hue, saturation, brightness).toColor();
+  static Color get accent => HSVColor.fromAHSV(1, hue, .68, 1).toColor();
+  static void notify() => revision.value++;
   static Future<void> load() async {
     final p = await SharedPreferences.getInstance();
-    hue.value = p.getDouble('theme_hue') ?? 258;
-    glass.value = p.getBool('theme_glass') ?? true;
+    hue = p.getDouble('theme_hue') ?? 258;
+    saturation = p.getDouble('theme_saturation') ?? 0;
+    brightness = p.getDouble('theme_brightness') ?? 0;
+    glass = p.getBool('theme_glass') ?? true;
+    amoled = p.getBool('theme_amoled') ?? true;
+    compact = p.getBool('theme_compact') ?? false;
+    reduceMotion = p.getBool('theme_reduce_motion') ?? false;
   }
   static Future<void> save() async {
     final p = await SharedPreferences.getInstance();
-    await p.setDouble('theme_hue', hue.value);
-    await p.setBool('theme_glass', glass.value);
+    await p.setDouble('theme_hue', hue);
+    await p.setDouble('theme_saturation', saturation);
+    await p.setDouble('theme_brightness', brightness);
+    await p.setBool('theme_glass', glass);
+    await p.setBool('theme_amoled', amoled);
+    await p.setBool('theme_compact', compact);
+    await p.setBool('theme_reduce_motion', reduceMotion);
+    notify();
+  }
+  static Future<void> reset() async {
+    hue = 258; saturation = 0; brightness = 0;
+    glass = true; amoled = true; compact = false; reduceMotion = false;
+    await save();
   }
 }
 
@@ -36,24 +57,36 @@ Future<void> main() async {
 class PikafyApp extends StatelessWidget {
   const PikafyApp({super.key});
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<double>(
-    valueListenable: PikafyTheme.hue,
-    builder: (context, hue, _) => MaterialApp(
+  Widget build(BuildContext context) => ValueListenableBuilder<int>(
+    valueListenable: PikafyTheme.revision,
+    builder: (context, _, __) => MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Pikafy',
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF090B12),
-        colorScheme: ColorScheme.fromSeed(seedColor: HSVColor.fromAHSV(1, hue, .58, 1).toColor(), brightness: Brightness.dark),
+        scaffoldBackgroundColor: PikafyTheme.background,
+        colorScheme: ColorScheme.fromSeed(seedColor: PikafyTheme.accent, brightness: Brightness.dark),
         useMaterial3: true,
+        visualDensity: PikafyTheme.compact ? VisualDensity.compact : VisualDensity.standard,
+        pageTransitionsTheme: PageTransitionsTheme(builders: {
+          for (final platform in TargetPlatform.values)
+            platform: PikafyTheme.reduceMotion ? const _NoMotionPageTransitionsBuilder() : const ZoomPageTransitionsBuilder(),
+        }),
         inputDecorationTheme: InputDecorationTheme(
-          filled: true, fillColor: const Color(0xFF171A27),
+          filled: true, fillColor: const Color(0xFF171717),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
         ),
       ),
       home: supabaseUrl.isEmpty || supabaseKey.isEmpty ? const SetupScreen() : const AuthGate(),
     ),
   );
+}
+
+class _NoMotionPageTransitionsBuilder extends PageTransitionsBuilder {
+  const _NoMotionPageTransitionsBuilder();
+  @override
+  Widget buildTransitions<T>(PageRoute<T> route, BuildContext context,
+      Animation<double> animation, Animation<double> secondaryAnimation, Widget child) => child;
 }
 
 class AuthGate extends StatelessWidget {
@@ -253,12 +286,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: const Text('pikafy', style: TextStyle(fontWeight: FontWeight.w800)),
+      backgroundColor: Colors.transparent,
       actions: [
         IconButton(tooltip: 'Theme studio', icon: const Icon(Icons.palette_outlined),
           onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ThemeMakerScreen()))),
         IconButton(tooltip: 'Log out', onPressed: () => Supabase.instance.client.auth.signOut(), icon: const Icon(Icons.logout_rounded)),
       ],
     ),
+    backgroundColor: PikafyTheme.background,
     body: SafeArea(child: Column(children: [
       Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 12), child: TextField(
         controller: searchController, textInputAction: TextInputAction.search, onSubmitted: (_) => search(),
@@ -288,7 +323,7 @@ class _HomeScreenState extends State<HomeScreen> {
             return ValueListenableBuilder<bool>(
               valueListenable: PikafyTheme.glass,
               builder: (context, enabled, _) => Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: PikafyTheme.compact ? 1 : 4),
                 child: ClipRRect(borderRadius: BorderRadius.circular(18),
                   child: enabled
                     ? BackdropFilter(filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
@@ -334,65 +369,128 @@ class ThemeMakerScreen extends StatefulWidget {
   @override
   State<ThemeMakerScreen> createState() => _ThemeMakerScreenState();
 }
+
 class _ThemeMakerScreenState extends State<ThemeMakerScreen> {
-  late double hue;
-  late bool glass;
+  late double hue, saturation, brightness;
+  late bool glass, amoled, compact, reduceMotion;
   @override
   void initState() {
     super.initState();
-    hue = PikafyTheme.hue.value;
-    glass = PikafyTheme.glass.value;
+    hue = PikafyTheme.hue; saturation = PikafyTheme.saturation;
+    brightness = PikafyTheme.brightness; glass = PikafyTheme.glass;
+    amoled = PikafyTheme.amoled; compact = PikafyTheme.compact;
+    reduceMotion = PikafyTheme.reduceMotion;
   }
-  Color get accent => HSVColor.fromAHSV(1, hue, .58, 1).toColor();
+  Color get chosen => HSVColor.fromAHSV(1, hue, saturation, brightness).toColor();
+  Color get accent => HSVColor.fromAHSV(1, hue, .68, 1).toColor();
+
+  Widget section(String title, Widget child) => Padding(
+    padding: const EdgeInsets.only(top: 24, bottom: 8),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8), child,
+    ]),
+  );
+
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Theme studio')),
-    body: ListView(padding: const EdgeInsets.all(20), children: [
-      const Text('MAKE PIKAFY YOURS', style: TextStyle(letterSpacing: 2, color: Colors.white60, fontSize: 12)),
-      const SizedBox(height: 16),
-      ClipRRect(borderRadius: BorderRadius.circular(28), child: Stack(children: [
-        Container(height: 180, decoration: BoxDecoration(gradient: LinearGradient(
-          colors: [const Color(0xFF101522), accent.withValues(alpha: .55), const Color(0xFF101522)]))),
+    appBar: AppBar(title: const Text('Personalise Pikafy')),
+    body: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 32), children: [
+      ClipRRect(borderRadius: BorderRadius.circular(26), child: Stack(children: [
+        Container(height: 190, color: amoled ? Colors.black : chosen),
         if (glass) Positioned.fill(child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Container(color: Colors.white.withValues(alpha: .06)))),
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: Container(color: Colors.white.withValues(alpha: .07)))),
         Positioned.fill(child: Padding(padding: const EdgeInsets.all(20), child: Column(
           crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Icon(Icons.graphic_eq, size: 34), const Spacer(),
-            const Text('Your theme preview', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Container(height: 8, width: 150, decoration: BoxDecoration(color: accent, borderRadius: BorderRadius.circular(20))),
-            const SizedBox(height: 8),
-            const Text('Liquid glass • Custom accent', style: TextStyle(color: Colors.white70)),
+            Row(children: [Icon(Icons.graphic_eq_rounded, color: accent, size: 32),
+              const Spacer(), const Text('PIKAFY PREVIEW', style: TextStyle(letterSpacing: 2, fontSize: 10))]),
+            const Spacer(),
+            const Text('Made for your mood', style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 12),
+            Row(children: [for (int i=0;i<5;i++) Container(
+              margin: const EdgeInsets.only(right: 6), width: 28, height: 28,
+              decoration: BoxDecoration(color: accent.withValues(alpha: 1-i*.13), borderRadius: BorderRadius.circular(8)))])
           ]))),
       ])),
-      const SizedBox(height: 28),
-      const Text('Accent colour', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
-      Slider(value: hue, min: 0, max: 360, divisions: 360, activeColor: accent,
-        onChanged: (v) => setState(() => hue = v)),
-      Wrap(spacing: 10, children: [258.0, 195.0, 330.0, 25.0, 110.0, 45.0].map((v) =>
-        GestureDetector(onTap: () => setState(() => hue = v),
-          child: CircleAvatar(radius: 17, backgroundColor: HSVColor.fromAHSV(1, v, .58, 1).toColor(),
-            child: (hue - v).abs() < 1 ? const Icon(Icons.check, size: 18, color: Colors.white) : null))
-      ).toList()),
-      const SizedBox(height: 24),
-      SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Liquid glass effect'),
-        subtitle: const Text('Frosted translucent panels with blur'), value: glass,
-        onChanged: (v) => setState(() => glass = v)),
-      const SizedBox(height: 18),
-      FilledButton.icon(icon: const Icon(Icons.check), label: const Text('Save my theme'),
+      section('Home screen colour', Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(amoled ? 'AMOLED black is active' : 'Custom colour', style: const TextStyle(color: Colors.white70)),
+        const SizedBox(height: 10),
+        Wrap(spacing: 10, runSpacing: 10, children: [
+          for (final c in [Colors.black, const Color(0xFF101522), const Color(0xFF17233B),
+            const Color(0xFF241334), const Color(0xFF12352F), const Color(0xFF3A2020)])
+            GestureDetector(onTap: () => setState(() {
+              amoled = c == Colors.black;
+              final hsv = HSVColor.fromColor(c); hue = hsv.hue; saturation = hsv.saturation; brightness = hsv.value;
+            }), child: CircleAvatar(radius: 19, backgroundColor: c,
+              child: (amoled && c == Colors.black) ? const Icon(Icons.check, color: Colors.white, size: 18) : null)),
+        ]),
+        SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('AMOLED black'),
+          subtitle: const Text('Pure black background for OLED screens'), value: amoled,
+          onChanged: (v) => setState(() => amoled = v)),
+        Opacity(opacity: amoled ? .45 : 1, child: IgnorePointer(ignoring: amoled, child: Column(children: [
+          Row(children: [const Expanded(child: Text('Colour hue')), Text('${hue.round()}°')]),
+          Slider(value: hue, min: 0, max: 360, divisions: 360, activeColor: accent,
+            onChanged: (v) => setState(() { hue = v; amoled = false; })),
+          const Text('Saturation', style: TextStyle(color: Colors.white70)),
+          Slider(value: saturation, min: 0, max: 1, divisions: 100,
+            onChanged: (v) => setState(() { saturation = v; amoled = false; })),
+          const Text('Brightness', style: TextStyle(color: Colors.white70)),
+          Slider(value: brightness, min: .05, max: 1, divisions: 95,
+            onChanged: (v) => setState(() { brightness = v; amoled = false; })),
+          Container(height: 42, decoration: BoxDecoration(color: chosen, borderRadius: BorderRadius.circular(12))),
+        ]))),
+      ])),
+      section('Appearance', Column(children: [
+        SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Liquid Glass'),
+          subtitle: const Text('Blurred translucent panels'), value: glass,
+          onChanged: (v) => setState(() => glass = v)),
+        SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Compact layout'),
+          subtitle: const Text('Fit more music on screen'), value: compact,
+          onChanged: (v) => setState(() => compact = v)),
+        SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Reduce animations'),
+          subtitle: const Text('Simpler transitions and less motion'), value: reduceMotion,
+          onChanged: (v) => setState(() => reduceMotion = v)),
+      ])),
+      section('Quick themes', Wrap(spacing: 10, runSpacing: 10, children: [
+        for (final item in [
+          ('AMOLED', Colors.black), ('Midnight', const Color(0xFF101522)),
+          ('Ocean', const Color(0xFF123B52)), ('Dream', const Color(0xFF302044)),
+          ('Forest', const Color(0xFF173A2B)), ('Rose', const Color(0xFF482532)),
+        ])
+          ActionChip(avatar: CircleAvatar(backgroundColor: item.$2, radius: 9),
+            label: Text(item.$1), onPressed: () => setState(() {
+              final hsv = HSVColor.fromColor(item.$2); hue = hsv.hue;
+              saturation = hsv.saturation; brightness = hsv.value;
+              amoled = item.$1 == 'AMOLED';
+            })),
+      ])),
+      const SizedBox(height: 26),
+      FilledButton.icon(icon: const Icon(Icons.check_rounded), label: const Text('Save customisation'),
         onPressed: () async {
-          PikafyTheme.hue.value = hue;
-          PikafyTheme.glass.value = glass;
+          PikafyTheme.hue = hue; PikafyTheme.saturation = saturation;
+          PikafyTheme.brightness = brightness; PikafyTheme.glass = glass;
+          PikafyTheme.amoled = amoled; PikafyTheme.compact = compact;
+          PikafyTheme.reduceMotion = reduceMotion;
           await PikafyTheme.save();
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Theme saved on this device.')));
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Your Pikafy style has been saved.')));
             Navigator.pop(context);
           }
         }),
-      const SizedBox(height: 10),
-      const Text('Saved on this device for now. Cloud theme sync can be added later.',
-        style: TextStyle(color: Colors.white54, fontSize: 12)),
+      TextButton.icon(icon: const Icon(Icons.restart_alt), label: const Text('Reset to default (AMOLED black)'),
+        onPressed: () async {
+          await PikafyTheme.reset();
+          if (mounted) setState(() {
+            hue = PikafyTheme.hue; saturation = PikafyTheme.saturation;
+            brightness = PikafyTheme.brightness; glass = PikafyTheme.glass;
+            amoled = PikafyTheme.amoled; compact = PikafyTheme.compact;
+            reduceMotion = PikafyTheme.reduceMotion;
+          });
+        }),
+      const Padding(padding: EdgeInsets.only(top: 12), child: Text(
+        'Custom colours support the full hue range. Settings are currently saved on this device.',
+        textAlign: TextAlign.center, style: TextStyle(color: Colors.white54, fontSize: 12))),
     ]),
   );
 }
